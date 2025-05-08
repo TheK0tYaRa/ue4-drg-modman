@@ -1,0 +1,12 @@
+[package]
+name = "ue4-drg-modman"
+version = "0.0.1"
+edition = "2024"
+
+[dependencies]
+eframe = "0.31.1"
+egui = "0.31.1"
+serde = { version = "1.0", features = ["derive"] }
+rfd = "0.15.3"
+rusqlite = { version = "0.35.0", features = ["bundled"] }
+dirs = "6.0.0"
