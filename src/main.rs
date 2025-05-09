@@ -17,6 +17,7 @@ struct ModManager {
     show_delete_confirmation: bool,
     profile_to_delete: String,
     delete_confirmation_requested: bool,
+    file_path: String,
 }
 
 struct Mod {
@@ -60,6 +61,76 @@ impl Default for ModManager {
             show_delete_confirmation: false,
             profile_to_delete: String::new(),
             delete_confirmation_requested: false,
+            file_path: String::new(),
+        }
+    }
+}
+
+impl ModManager {
+    fn install_mod(&mut self, mod_id: &str) {
+        // Find the mod in the list
+        if let Some(mod_entry) = self.mods.iter().find(|m| m.mod_id == mod_id) {
+            // Create the download directory if it doesn't exist
+            let app_data_dir = dirs::data_dir()
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
+                .join("ue4-drg-modman");
+            
+            let download_dir = app_data_dir.join(&mod_entry.download_folder);
+            std::fs::create_dir_all(&download_dir).unwrap_or_else(|_| {
+                println!("Failed to create download directory: {:?}", download_dir);
+            });
+            
+            // Create a version-specific directory
+            let version_dir = download_dir.join(&mod_entry.selected_version);
+            std::fs::create_dir_all(&version_dir).unwrap_or_else(|_| {
+                println!("Failed to create version directory: {:?}", version_dir);
+            });
+            
+            // Determine if it's a URL or file path
+            let is_url = mod_entry.mod_link.starts_with("http://") || 
+                         mod_entry.mod_link.starts_with("https://");
+            
+            if is_url {
+                // TODO: Implement URL download
+                // For now, just print a message
+                println!("Would download from URL: {}", mod_entry.mod_link);
+                
+                // After download, update the mod status
+                if let Ok(()) = self.db.update_mod_status(&mod_entry.mod_id, true) {
+                    // Reload mods
+                    if let Ok(mods) = self.db.get_mods() {
+                        self.mods = mods;
+                    }
+                }
+            } else {
+                // It's a local file, copy it to the version directory
+                let source_path = std::path::Path::new(&mod_entry.mod_link);
+                if source_path.exists() {
+                    let file_name = source_path.file_name().unwrap_or_else(|| {
+                        std::ffi::OsStr::new("mod_file")
+                    });
+                    let dest_path = version_dir.join(file_name);
+                    
+                    match std::fs::copy(source_path, &dest_path) {
+                        Ok(_) => {
+                            println!("Copied mod file to: {:?}", dest_path);
+                            
+                            // Update the mod status
+                            if let Ok(()) = self.db.update_mod_status(&mod_entry.mod_id, true) {
+                                // Reload mods
+                                if let Ok(mods) = self.db.get_mods() {
+                                    self.mods = mods;
+                                }
+                            }
+                        },
+                        Err(e) => {
+                            println!("Failed to copy mod file: {}", e);
+                        }
+                    }
+                } else {
+                    println!("Source file does not exist: {}", mod_entry.mod_link);
+                }
+            }
         }
     }
 }
@@ -94,6 +165,69 @@ impl eframe::App for ModManager {
                 if ui.selectable_label(matches!(self.current_tab, Tab::Settings), "Settings").clicked() {
                     self.current_tab = Tab::Settings;
                 }
+                
+            });
+            
+            // Mod file input section
+            ui.horizontal(|ui| {
+                // Add button to process the file path
+                if ui.button("[+]").clicked() && !self.file_path.is_empty() {
+                    // Determine if it's a URL or file path
+                    let is_url = self.file_path.starts_with("http://") || 
+                                 self.file_path.starts_with("https://");
+                    
+                    // Create a new mod entry
+                    let mod_id = format!("mod_{}", chrono::Utc::now().timestamp());
+                    let mod_name = if is_url {
+                        // Extract name from URL if possible
+                        self.file_path.split('/').last().unwrap_or("New Mod").to_string()
+                    } else {
+                        // Extract name from file path
+                        std::path::Path::new(&self.file_path)
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("New Mod")
+                            .to_string()
+                    };
+                    
+                    let new_mod = ModEntry {
+                        mod_id,
+                        mod_name,
+                        mod_link: self.file_path.clone(),
+                        download_folder: "downloads".to_string(),
+                        selected_version: "1.0.0".to_string(),
+                        enabled: false,
+                    };
+                    
+                    // Add the mod to the database
+                    if let Ok(()) = self.db.add_mod(&new_mod) {
+                        // Reload mods
+                        if let Ok(mods) = self.db.get_mods() {
+                            self.mods = mods;
+                        }
+                        // Clear the file path
+                        self.file_path.clear();
+                    }
+                }
+                
+                ui.add_space(4.0);
+                
+                // File selector button
+                if ui.button("Browse").clicked() {
+                    if let Some(path) = rfd::FileDialog::new().pick_file() {
+                        if let Some(path_str) = path.to_str() {
+                            self.file_path = path_str.to_string();
+                        }
+                    }
+                }
+                
+                ui.add_space(4.0);
+                
+                // File path input that stretches to fill available space
+                ui.add(egui::TextEdit::singleline(&mut self.file_path)
+                    .desired_width(ui.available_width())
+                    .hint_text("Mod file path or URL...")
+                );
             });
         });
 
@@ -214,23 +348,29 @@ impl eframe::App for ModManager {
                 });
             });
 
-        egui::CentralPanel::default().show(ctx, |ui| {
-            match self.current_tab {
-                Tab::Browse | Tab::Installed => {
-                    // Filter mods based on search and installed status
-                    let filtered_mods: Vec<&ModEntry> = self.mods
-                        .iter()
-                        .filter(|m| {
-                            m.mod_name.to_lowercase().contains(&self.search_query.to_lowercase()) &&
-                            (!self.show_installed_only || m.enabled)
-                        })
-                        .collect();
-                    
-                    // Scrollable list with overlay scrollbar
-                    egui::ScrollArea::vertical()
-                        .auto_shrink([false; 2])
-                        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
-                        .show(ui, |ui| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                match self.current_tab {
+                    Tab::Browse | Tab::Installed => {
+                        // Flag to track if we need to reload mods
+                        let mut needs_reload = false;
+                        // Store mod ID to install (if any)
+                        let mut mod_to_install: Option<String> = None;
+                        
+                        // Filter mods based on search and installed status
+                        let filtered_mods: Vec<&ModEntry> = self.mods
+                            .iter()
+                            .filter(|m| {
+                                m.mod_name.to_lowercase().contains(&self.search_query.to_lowercase()) &&
+                                (!self.show_installed_only || m.enabled)
+                            })
+                            .collect();
+                        
+                        // Scrollable list with overlay scrollbar
+                        egui::ScrollArea::vertical()
+                            .auto_shrink([false; 2])
+                            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
+                            .show(ui, |ui| {
+    
 
                             for mod_item in &filtered_mods {
                                 let is_selected = self.selected_mods.contains(&mod_item.mod_id);
@@ -297,17 +437,31 @@ impl eframe::App for ModManager {
                                                 needs_reload = true;
                                             }
                                         }
+                                        
+                                        // Add Install button if not enabled
+                                        if !mod_item.enabled {
+                                            if ui.button("Install").clicked() {
+                                                // Store the mod ID to install after the loop
+                                                mod_to_install = Some(mod_item.mod_id.clone());
+                                            }
+                                        }
                                     });
                                 });
                                 
                                 ui.separator();
                             }
-                        });
+                        }
+                    );
+    
+                    // Apply any changes that were requested during rendering
+                    if let Some(mod_id) = mod_to_install {
+                        self.install_mod(&mod_id);
+                    }
+                    
                     if needs_reload {
                         if let Ok(mods) = self.db.get_mods() {
                             self.mods = mods;
                         }
-                        needs_reload = false;
                     }
                 },
                 Tab::Settings => {
