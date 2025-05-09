@@ -3,7 +3,7 @@ mod db;
 use db::{Database, ModEntry};
 use eframe::egui;
 use egui::{Color32, RichText};
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
 
 struct ModManager {
     mods: Vec<ModEntry>,
@@ -18,20 +18,28 @@ struct ModManager {
     profile_to_delete: String,
     delete_confirmation_requested: bool,
     file_path: String,
+    mod_delete_confirmation_requested: HashMap<String, bool>,
 }
 
-struct Mod {
-    name: String,
-    author: String,
-    description: String,
-    installed: bool,
-    version: String,
-}
+// struct Mod {
+//     name: String,
+//     author: String,
+//     description: String,
+//     installed: bool,
+//     version: String,
+// }
 
 enum Tab {
     Browse,
     Installed,
     Settings,
+}
+
+enum ModAction {
+    RequestDeleteConfirmation(String),
+    CancelDeleteConfirmation(String),
+    DeleteModVersion(String),
+    UninstallMod(String),
 }
 
 impl Default for ModManager {
@@ -62,6 +70,7 @@ impl Default for ModManager {
             profile_to_delete: String::new(),
             delete_confirmation_requested: false,
             file_path: String::new(),
+            mod_delete_confirmation_requested: HashMap::new(),
         }
     }
 }
@@ -141,7 +150,7 @@ impl eframe::App for ModManager {
         ctx.set_visuals(egui::Visuals::dark());
 
         // Flag to track if we need to reload mods
-        let mut needs_reload = false;
+        // let needs_reload = false;
 
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             ui.horizontal(|ui| {
@@ -168,67 +177,69 @@ impl eframe::App for ModManager {
                 
             });
             
-            // Mod file input section
-            ui.horizontal(|ui| {
-                // Add button to process the file path
-                if ui.button("[+]").clicked() && !self.file_path.is_empty() {
-                    // Determine if it's a URL or file path
-                    let is_url = self.file_path.starts_with("http://") || 
-                                 self.file_path.starts_with("https://");
-                    
-                    // Create a new mod entry
-                    let mod_id = format!("mod_{}", chrono::Utc::now().timestamp());
-                    let mod_name = if is_url {
-                        // Extract name from URL if possible
-                        self.file_path.split('/').last().unwrap_or("New Mod").to_string()
-                    } else {
-                        // Extract name from file path
-                        std::path::Path::new(&self.file_path)
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("New Mod")
-                            .to_string()
-                    };
-                    
-                    let new_mod = ModEntry {
-                        mod_id,
-                        mod_name,
-                        mod_link: self.file_path.clone(),
-                        download_folder: "downloads".to_string(),
-                        selected_version: "1.0.0".to_string(),
-                        enabled: false,
-                    };
-                    
-                    // Add the mod to the database
-                    if let Ok(()) = self.db.add_mod(&new_mod) {
-                        // Reload mods
-                        if let Ok(mods) = self.db.get_mods() {
-                            self.mods = mods;
-                        }
-                        // Clear the file path
-                        self.file_path.clear();
-                    }
-                }
-                
-                ui.add_space(4.0);
-                
-                // File selector button
-                if ui.button("Browse").clicked() {
-                    if let Some(path) = rfd::FileDialog::new().pick_file() {
-                        if let Some(path_str) = path.to_str() {
-                            self.file_path = path_str.to_string();
+            // Mod file input section - only show in Browse tab
+            if matches!(self.current_tab, Tab::Browse) {
+                ui.horizontal(|ui| {
+                    // Add button to process the file path
+                    if ui.button("[+]").clicked() && !self.file_path.is_empty() {
+                        // Determine if it's a URL or file path
+                        let is_url = self.file_path.starts_with("http://") || 
+                                    self.file_path.starts_with("https://");
+                        
+                        // Create a new mod entry
+                        let mod_id = format!("mod_{}", chrono::Utc::now().timestamp());
+                        let mod_name = if is_url {
+                            // Extract name from URL if possible
+                            self.file_path.split('/').last().unwrap_or("New Mod").to_string()
+                        } else {
+                            // Extract name from file path
+                            std::path::Path::new(&self.file_path)
+                                .file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or("New Mod")
+                                .to_string()
+                        };
+                        
+                        let new_mod = ModEntry {
+                            mod_id,
+                            mod_name,
+                            mod_link: self.file_path.clone(),
+                            download_folder: "downloads".to_string(),
+                            selected_version: "1.0.0".to_string(),
+                            enabled: false,
+                        };
+                        
+                        // Add the mod to the database
+                        if let Ok(()) = self.db.add_mod(&new_mod) {
+                            // Reload mods
+                            if let Ok(mods) = self.db.get_mods() {
+                                self.mods = mods;
+                            }
+                            // Clear the file path
+                            self.file_path.clear();
                         }
                     }
-                }
-                
-                ui.add_space(4.0);
-                
-                // File path input that stretches to fill available space
-                ui.add(egui::TextEdit::singleline(&mut self.file_path)
-                    .desired_width(ui.available_width())
-                    .hint_text("Mod file path or URL...")
-                );
-            });
+                    
+                    ui.add_space(4.0);
+                    
+                    // File selector button
+                    if ui.button("Browse").clicked() {
+                        if let Some(path) = rfd::FileDialog::new().pick_file() {
+                            if let Some(path_str) = path.to_str() {
+                                self.file_path = path_str.to_string();
+                            }
+                        }
+                    }
+                    
+                    ui.add_space(4.0);
+                    
+                    // File path input that stretches to fill available space
+                    ui.add(egui::TextEdit::singleline(&mut self.file_path)
+                        .desired_width(ui.available_width())
+                        .hint_text("Mod file path or URL...")
+                    );
+                });
+            }
         });
 
         egui::SidePanel::left("side_panel")
@@ -355,6 +366,8 @@ impl eframe::App for ModManager {
                         let mut needs_reload = false;
                         // Store mod ID to install (if any)
                         let mut mod_to_install: Option<String> = None;
+                        // Store mod actions to perform after rendering
+                        let mut mod_actions: Vec<ModAction> = Vec::new();
                         
                         // Filter mods based on search and installed status
                         let filtered_mods: Vec<&ModEntry> = self.mods
@@ -422,27 +435,63 @@ impl eframe::App for ModManager {
                                         ui.label(&mod_item.mod_link);
                                     });
                                     
-                                    let mod_id = mod_item.mod_id.clone();
-                                    let enabled = mod_item.enabled;
+                                    // let mod_id = mod_item.mod_id.clone();
+                                    // let enabled = mod_item.enabled;
                                     
                                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-
-                                        if ui.button(if mod_item.enabled { "Disable" } else { "Enable" }).clicked() {
-                                            let mod_id = mod_item.mod_id.clone();
-                                            let new_status = !mod_item.enabled;
+                                        // Delete button with confirmation
+                                        let mod_id = mod_item.mod_id.clone();
+                                        let is_delete_requested = self.mod_delete_confirmation_requested.get(&mod_id).copied().unwrap_or(false);
+                                        
+                                        if !is_delete_requested {
+                                            if ui.button("🗑").clicked() {
+                                                // Store action to perform after the loop
+                                                mod_actions.push(ModAction::RequestDeleteConfirmation(mod_id.clone()));
+                                            }
+                                        } else {
+                                            // First button (cancel)
+                                            if ui.button("🗑").clicked() {
+                                                // Store action to perform after the loop
+                                                mod_actions.push(ModAction::CancelDeleteConfirmation(mod_id.clone()));
+                                            }
                                             
-                                            // Store the action to perform after the loop
-                                            if let Ok(()) = self.db.update_mod_status(&mod_id, new_status) {
-                                                // Flag that we need to reload mods after the loop
-                                                needs_reload = true;
+                                            // Second button (confirm - red) - to the left of the first one
+                                            if ui.add(egui::Button::new(
+                                                RichText::new("🗑").color(Color32::RED)
+                                            )).clicked() {
+                                                // Store action to perform after the loop
+                                                if matches!(self.current_tab, Tab::Browse) {
+                                                    mod_actions.push(ModAction::DeleteModVersion(mod_id.clone()));
+                                                } else {
+                                                    mod_actions.push(ModAction::UninstallMod(mod_id.clone()));
+                                                }
+                                            }
+                                            
+                                            // Auto-cancel if mouse moves away
+                                            if !ui.ui_contains_pointer() {
+                                                mod_actions.push(ModAction::CancelDeleteConfirmation(mod_id.clone()));
                                             }
                                         }
-                                        
-                                        // Add Install button if not enabled
-                                        if !mod_item.enabled {
-                                            if ui.button("Install").clicked() {
-                                                // Store the mod ID to install after the loop
-                                                mod_to_install = Some(mod_item.mod_id.clone());
+
+                                        // Show different buttons based on tab
+                                        if matches!(self.current_tab, Tab::Browse) {
+                                            // Show Install button in Browse tab
+                                            if !mod_item.enabled {
+                                                if ui.button("Install").clicked() {
+                                                    // Store the mod ID to install after the loop
+                                                    mod_to_install = Some(mod_id.clone());
+                                                }
+                                            }
+                                        } else if matches!(self.current_tab, Tab::Installed) {
+                                            // Show Enable/Disable button in Installed tab
+                                            if ui.button(if mod_item.enabled { "Disable" } else { "Enable" }).clicked() {
+                                                let new_status = !mod_item.enabled;
+                                                
+                                                // Store the action to perform after the loop
+                                                if let Ok(()) = self.db.update_mod_status(&mod_id, new_status) {
+                                                    // Flag that we need to reload mods after the loop
+                                                    needs_reload = true;
+                                                }
                                             }
                                         }
                                     });
@@ -450,8 +499,46 @@ impl eframe::App for ModManager {
                                 
                                 ui.separator();
                             }
+                        });
+
+                    // Process mod actions
+                    for action in mod_actions {
+                        match action {
+                            ModAction::RequestDeleteConfirmation(mod_id) => {
+                                self.mod_delete_confirmation_requested.insert(mod_id, true);
+                            },
+                            ModAction::CancelDeleteConfirmation(mod_id) => {
+                                self.mod_delete_confirmation_requested.remove(&mod_id);
+                            },
+                            ModAction::DeleteModVersion(mod_id) => {
+                                // Delete the selected version from cache
+                                if let Some(mod_entry) = self.mods.iter().find(|m| m.mod_id == mod_id) {
+                                    let app_data_dir = dirs::data_dir()
+                                        .unwrap_or_else(|| std::path::PathBuf::from("."))
+                                        .join("ue4-drg-modman");
+                                    
+                                    let version_dir = app_data_dir
+                                        .join(&mod_entry.download_folder)
+                                        .join(&mod_entry.selected_version);
+                                    
+                                    if version_dir.exists() {
+                                        if let Err(e) = std::fs::remove_dir_all(&version_dir) {
+                                            println!("Failed to delete version directory: {}", e);
+                                        }
+                                    }
+                                }
+                                self.mod_delete_confirmation_requested.remove(&mod_id);
+                                needs_reload = true;
+                            },
+                            ModAction::UninstallMod(mod_id) => {
+                                // Update the mod status to disabled
+                                if let Ok(()) = self.db.update_mod_status(&mod_id, false) {
+                                    needs_reload = true;
+                                }
+                                self.mod_delete_confirmation_requested.remove(&mod_id);
+                            },
                         }
-                    );
+                    }
     
                     // Apply any changes that were requested during rendering
                     if let Some(mod_id) = mod_to_install {
@@ -463,7 +550,7 @@ impl eframe::App for ModManager {
                             self.mods = mods;
                         }
                     }
-                },
+                }, // End of Tab::Browse | Tab::Installed match arm
                 Tab::Settings => {
                     ui.heading("Settings");
                     ui.separator();

@@ -46,7 +46,7 @@ impl Database {
             current_profile: "Default".to_string(),
         })
     }
-    
+
     pub fn create_profile(&self, profile_name: &str) -> Result<()> {
         self.conn.execute(
             "INSERT INTO profiles (name) VALUES (?1)",
@@ -91,8 +91,7 @@ impl Database {
         
         Ok(())
     }
-   
-    
+
     pub fn get_profiles(&self) -> Result<Vec<String>> {
         let mut stmt = self.conn.prepare("SELECT name FROM profiles ORDER BY name")?;
         let profiles = stmt.query_map([], |row| {
@@ -103,15 +102,15 @@ impl Database {
         
         Ok(profiles)
     }
-    
+
     pub fn set_current_profile(&mut self, profile: String) {
         self.current_profile = profile;
     }
-    
+
     pub fn get_current_profile(&self) -> &str {
         &self.current_profile
     }
-    
+
     pub fn get_mods(&self) -> Result<Vec<ModEntry>> {
         let table_name = format!("mods_{}", self.current_profile);
         let query = format!(
@@ -135,7 +134,7 @@ impl Database {
         
         Ok(mods)
     }
-    
+
     pub fn add_mod(&self, mod_entry: &ModEntry) -> Result<()> {
         let table_name = format!("mods_{}", self.current_profile);
         let query = format!(
@@ -159,7 +158,7 @@ impl Database {
         
         Ok(())
     }
-    
+
     pub fn update_mod_status(&self, mod_id: &str, enabled: bool) -> Result<()> {
         let table_name = format!("mods_{}", self.current_profile);
         let query = format!(
@@ -171,16 +170,16 @@ impl Database {
         
         Ok(())
     }
-    
-    pub fn update_mod_version(&self, mod_id: &str, version: &str) -> Result<()> {
-        let table_name = format!("mods_{}", self.current_profile);
-        let query = format!(
-            "UPDATE {} SET selected_version = ?1 WHERE mod_id = ?2",
-            table_name
-        );
+
+    // pub fn update_mod_version(&self, mod_id: &str, version: &str) -> Result<()> {
+    //     let table_name = format!("mods_{}", self.current_profile);
+    //     let query = format!(
+    //         "UPDATE {} SET selected_version = ?1 WHERE mod_id = ?2",
+    //         table_name
+    //     );
         
-        self.conn.execute(&query, params![version, mod_id])?;
+    //     self.conn.execute(&query, params![version, mod_id])?;
         
-        Ok(())
-    }
+    //     Ok(())
+    // }
 }
